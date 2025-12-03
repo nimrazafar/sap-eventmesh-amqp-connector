@@ -19,7 +19,7 @@ import static org.mule.runtime.extension.api.annotation.param.MediaType.ANY;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.jms.*;
+import jakarta.jms.*;
 import org.apache.qpid.jms.JmsConnectionFactory;
 
 import org.apache.http.HttpEntity;
@@ -86,7 +86,7 @@ public class SapAmqpConnectorMessageSource extends Source<String, Map<String, Ob
     @Summary("JMS message selector for filtering messages (optional)")
     private String messageSelector;
 
-    private javax.jms.Connection jmsConnection;
+    private jakarta.jms.Connection jmsConnection;
     private List<ConsumerWorker> consumers = new ArrayList<>();
 
     @Override
@@ -178,7 +178,7 @@ public class SapAmqpConnectorMessageSource extends Source<String, Map<String, Ob
      * Worker class that consumes messages in a separate thread
      */
     private class ConsumerWorker implements Runnable {
-        private final javax.jms.Connection jmsConn;
+        private final jakarta.jms.Connection jmsConn;
         private final String queueName;
         private final SourceCallback<String, Map<String, Object>> callback;
         private final int sessionAckMode;
@@ -186,7 +186,7 @@ public class SapAmqpConnectorMessageSource extends Source<String, Map<String, Ob
         private final int workerId;
         private volatile boolean active = true;
 
-        public ConsumerWorker(javax.jms.Connection jmsConn, String queueName, 
+        public ConsumerWorker(jakarta.jms.Connection jmsConn, String queueName, 
                             SourceCallback<String, Map<String, Object>> callback,
                             int sessionAckMode, String selector, int workerId) {
             this.jmsConn = jmsConn;

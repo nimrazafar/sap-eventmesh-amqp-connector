@@ -1,6 +1,7 @@
 package com.mycompany.mule.connectors.sapAMQPConnector.internal;
 
 import static org.mule.runtime.extension.api.annotation.param.MediaType.ANY;
+import java.nio.charset.StandardCharsets;
 import org.mule.runtime.extension.api.annotation.param.MediaType;
 import org.mule.runtime.extension.api.annotation.param.Config;
 import org.mule.runtime.extension.api.annotation.param.Connection;
@@ -9,15 +10,16 @@ import org.mule.runtime.extension.api.annotation.param.Optional;
 import org.mule.runtime.extension.api.annotation.param.display.DisplayName;
 import org.mule.runtime.extension.api.annotation.param.display.Summary;
 
-import javax.jms.ConnectionFactory;
-import javax.jms.Session;
-import javax.jms.Destination;
-import javax.jms.MessageProducer;
-import javax.jms.MessageConsumer;
-import javax.jms.TextMessage;
-import javax.jms.Message;
-import javax.jms.BytesMessage;
-import javax.jms.ObjectMessage;
+import jakarta.jms.ConnectionFactory;
+import jakarta.jms.Session;
+import jakarta.jms.Destination;
+import jakarta.jms.MessageProducer;
+import jakarta.jms.MessageConsumer;
+import jakarta.jms.TextMessage;
+import jakarta.jms.Message;
+import jakarta.jms.BytesMessage;
+import jakarta.jms.ObjectMessage;
+import jakarta.jms.JMSException;
 import org.apache.qpid.jms.JmsConnectionFactory;
 
 import org.mule.runtime.api.connection.ConnectionException;
@@ -60,7 +62,7 @@ public class SapAmqpConnectorOperations {
             @DisplayName("Queue Name") @Summary("Name of the queue to publish to") String queueName,
             @Content @DisplayName("Message Payload") Object payload) throws ConnectionException {
 
-        javax.jms.Connection jmsConnection = null;
+        jakarta.jms.Connection jmsConnection = null;
         Session session = null;
         MessageProducer producer = null;
 
@@ -115,7 +117,7 @@ public class SapAmqpConnectorOperations {
                 }
                 
                 // URL encode the Bearer token for the Authorization header
-                String encodedToken = URLEncoder.encode("Bearer " + accessToken, "UTF-8");
+                String encodedToken = URLEncoder.encode("Bearer " + accessToken, StandardCharsets.UTF_8);
                 
                 // Build connection URL with Authorization header
                 connectionUrl = String.format(
@@ -160,7 +162,7 @@ public class SapAmqpConnectorOperations {
             producer.send(msg);
             LOGGER.info("✅ Successfully published message to queue: {}", queueName);
 
-        } catch (javax.jms.JMSException e) {
+        } catch (JMSException e) {
             String errorMessage = (e.getMessage() != null) ? e.getMessage().toLowerCase() : "";
             LOGGER.error("JMS Error: {}", e.getMessage());
             
@@ -170,7 +172,7 @@ public class SapAmqpConnectorOperations {
                 errorMessage.contains("forbidden") || 
                 errorMessage.contains("security exception")) {
                 LOGGER.warn("❌ Authentication failed - invalidating token");
-                connection.setAccessToken(null, 0);
+                connection.clearToken();
                 throw new ConnectionException("Authentication failed: " + e.getMessage(), e);
             } else {
                 LOGGER.error("JMSException occurred", e);
@@ -186,12 +188,12 @@ public class SapAmqpConnectorOperations {
             LOGGER.debug("Closing JMS resources...");
             try { 
                 if (producer != null) producer.close(); 
-            } catch (javax.jms.JMSException e) { 
+            } catch (JMSException e) { 
                 LOGGER.error("Error closing producer", e); 
             }
             try { 
                 if (session != null) session.close(); 
-            } catch (javax.jms.JMSException e) { 
+            } catch (JMSException e) { 
                 LOGGER.error("Error closing session", e); 
             }
             try { 
@@ -220,7 +222,7 @@ public class SapAmqpConnectorOperations {
             @Summary("Time to wait for a message in milliseconds (default: 5000ms)") 
             long timeout) {
 
-        javax.jms.Connection jmsConnection = null;
+        jakarta.jms.Connection jmsConnection = null;
         Session session = null;
         MessageConsumer consumer = null;
 
@@ -260,8 +262,8 @@ public class SapAmqpConnectorOperations {
             session = jmsConnection.createSession(false, Session.AUTO_ACKNOWLEDGE);
             LOGGER.debug("JMS Session created");
             
-            Destination queue = session.createQueue(queueName );
-            LOGGER.debug("Destination queue: {}",queueName );
+            Destination queue = session.createQueue(queueName);
+            LOGGER.debug("Destination queue: {}", queueName);
             
             consumer = session.createConsumer(queue);
             LOGGER.debug("Message Consumer created");
@@ -303,7 +305,7 @@ public class SapAmqpConnectorOperations {
             LOGGER.info("✅ Successfully consumed message from queue: {}", queueName);
             return objectMapper.writeValueAsString(result);
 
-        } catch (javax.jms.JMSException e) {
+        } catch (JMSException e) {
             String errorMessage = (e.getMessage() != null) ? e.getMessage().toLowerCase() : "";
             LOGGER.error("JMS Error: {}", e.getMessage());
             
@@ -313,7 +315,7 @@ public class SapAmqpConnectorOperations {
                 errorMessage.contains("forbidden") || 
                 errorMessage.contains("security exception")) {
                 LOGGER.warn("❌ Authentication failed - invalidating token");
-                connection.setAccessToken(null, 0);
+                connection.clearToken();
                 return buildErrorResponse("AUTHENTICATION_ERROR", "Authentication failed: " + e.getMessage());
             } else {
                 LOGGER.error("JMSException occurred", e);
@@ -326,12 +328,12 @@ public class SapAmqpConnectorOperations {
             LOGGER.debug("Closing JMS resources...");
             try { 
                 if (consumer != null) consumer.close(); 
-            } catch (javax.jms.JMSException e) { 
+            } catch (JMSException e) { 
                 LOGGER.error("Error closing consumer", e); 
             }
             try { 
                 if (session != null) session.close(); 
-            } catch (javax.jms.JMSException e) { 
+            } catch (JMSException e) { 
                 LOGGER.error("Error closing session", e); 
             }
             try { 

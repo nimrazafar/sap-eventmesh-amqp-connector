@@ -117,3 +117,15 @@ override.properties
 *-service-key.json
 *-credentials.json
 sap-*.json
+
+# --------------- #
+# Studio-specific #
+# --------------- #
+src/main/resources/application-types.xml
+exchange-docs/
+target/
+.mule/**
+.mule/**/*
+.DS_Store
+velocity.log
+.2b9d2687-58d5-423d-bcf8-f484dcf042b3.pom
