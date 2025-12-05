@@ -12,7 +12,6 @@ import static org.mule.sdk.api.meta.JavaVersion.*;
 @Configurations(SapAmqpConnectorConfiguration.class)
 @JavaVersionSupport({JAVA_17})
 
-// Removed @JavaVersionSupport annotation
 public class SapAmqpConnectorExtension {
 
 }
