@@ -6,7 +6,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.myCompany</groupId>
 	<artifactId>sap-amqp-connector</artifactId>
-	<version>1.2.0</version>
+	<version>1.4.9</version>
 	<packaging>mule-extension</packaging>
 	<name>sap-amqp-connector Extension</name>
 
@@ -62,6 +62,7 @@
 			<version>${slf4j.version}</version>
 		</dependency>
 
+
 		<!-- <dependency> -->
 		<!-- <groupId>org.mule.runtime</groupId> -->
 		<!-- <artifactId>mule-extensions-api</artifactId> -->
@@ -110,7 +111,6 @@
 					<release>${maven.compiler.release}</release>
 				</configuration>
 			</plugin>
-
 			<plugin>
 				<groupId>com.mulesoft.munit</groupId>
 				<artifactId>munit-extensions-maven-plugin</artifactId>

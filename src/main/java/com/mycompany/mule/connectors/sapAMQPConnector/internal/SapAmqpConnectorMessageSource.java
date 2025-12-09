@@ -5,12 +5,18 @@ import org.mule.runtime.api.connection.ConnectionProvider;
 import org.mule.runtime.extension.api.annotation.Alias;
 import org.mule.runtime.extension.api.annotation.param.Config;
 import org.mule.runtime.extension.api.annotation.param.Connection;
-import org.mule.runtime.extension.api.annotation.param.Parameter;
 import org.mule.runtime.extension.api.annotation.param.Optional;
 import org.mule.runtime.extension.api.annotation.param.MediaType;
 import org.mule.runtime.extension.api.annotation.param.display.DisplayName;
 import org.mule.runtime.extension.api.annotation.param.display.Summary;
-import org.mule.runtime.extension.api.annotation.param.NullSafe;
+import org.mule.runtime.extension.api.annotation.param.display.Example;
+import org.mule.runtime.extension.api.annotation.param.display.Password;
+//import org.mule.sdk.api.annotation.Expression;
+//import org.mule.sdk.api.annotation.param.Parameter;
+//import org.mule.sdk.api.meta.ExpressionSupport;
+import org.mule.runtime.extension.api.annotation.Expression;
+import org.mule.runtime.extension.api.annotation.param.Parameter;
+import org.mule.runtime.api.meta.ExpressionSupport;
 import org.mule.runtime.extension.api.runtime.source.Source;
 import org.mule.runtime.extension.api.runtime.source.SourceCallback;
 import org.mule.runtime.extension.api.runtime.operation.Result;
@@ -23,15 +29,35 @@ import org.slf4j.LoggerFactory;
 import jakarta.jms.*;
 import org.apache.qpid.jms.JmsConnectionFactory;
 
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpResponse;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.util.EntityUtils;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.net.URI;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * Enumeration for JMS Acknowledgment Modes
+ */
+enum AcknowledgmentMode {
+    AUTO,
+    CLIENT,
+    DUPS_OK
+}
 
 /**
  * Message Source for consuming messages from SAP Event Mesh queues
@@ -45,17 +71,41 @@ public class SapAmqpConnectorMessageSource extends Source<String, Map<String, Ob
     private final Logger LOGGER = LoggerFactory.getLogger(SapAmqpConnectorMessageSource.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AtomicBoolean running = new AtomicBoolean(false);
-
+    
     @Config
     private SapAmqpConnectorConfiguration config;
 
     @Connection
     private ConnectionProvider<SapAmqpConnectorConnection> connectionProvider;
+     
     
     @Parameter
-    @Optional()
+    @DisplayName("Token URL")
+    @Summary("OAuth2 token endpoint URL")
+    @Example("https://your-tenant.authentication.sap.hana.ondemand.com/oauth/token")
+    @Expression(ExpressionSupport.SUPPORTED)
+    private String tokenUrl;
+
+    @Parameter
+    @DisplayName("Client ID")
+    @Summary("OAuth2 Client ID")
+    @Example("#[p('sap.clientId')]")
+    @Expression(ExpressionSupport.SUPPORTED)
+    private String clientId;
+
+    @Parameter
+    @Password
+    @DisplayName("Client Secret")
+    @Summary("OAuth2 Client Secret")
+    @Example("#[p('sap.clientSecret')]")
+    @Expression(ExpressionSupport.SUPPORTED)
+    private String clientSecret;
+    
+    @Parameter
     @DisplayName("Queue Name")
-    @Summary("Name of the queue to listen to") 
+    @Summary("Name of the queue to consume from")
+    @Example("myQueue")
+    @Expression(ExpressionSupport.SUPPORTED)
     String queueName;
 
     @Parameter
@@ -67,21 +117,16 @@ public class SapAmqpConnectorMessageSource extends Source<String, Map<String, Ob
     @Parameter
     @Optional(defaultValue = "AUTO")
     @DisplayName("Acknowledgment Mode")
-    @Summary("Message acknowledgment mode: AUTO, CLIENT, or DUPS_OK")
-    private String ackMode;
+    @Summary("Message acknowledgment mode")
+    private AcknowledgmentMode ackMode;
 
     @Parameter
     @Optional
     @DisplayName("Message Selector")
     @Summary("JMS message selector for filtering messages (optional)")
+    @Example("JMSPriority > 5")
+    @Expression(ExpressionSupport.SUPPORTED)
     private String messageSelector;
-
-    @Parameter
-    @Optional 
-    @DisplayName("Headers") 
-    @Summary("Custom headers including Authorization token") 
-    @NullSafe 
-    private List<MessageHeader> headers;
 
     private jakarta.jms.Connection jmsConnection;
     private List<ConsumerWorker> consumers = new ArrayList<>();
@@ -89,33 +134,25 @@ public class SapAmqpConnectorMessageSource extends Source<String, Map<String, Ob
     @Override
     public void onStart(SourceCallback<String, Map<String, Object>> sourceCallback) {
         LOGGER.info("=== Starting SAP Event Mesh Message Listener ===");
+        LOGGER.info("Token URL: {}", tokenUrl);
+        LOGGER.info("Client ID: {}", clientId);
+        LOGGER.info("Queue Name: {}", queueName);
+        
         running.set(true);
 
         try {
+            // Validate required parameters
+            validateParameters();
+            
             // Get connection from provider
             SapAmqpConnectorConnection muleConnection = connectionProvider.connect();
             
-            // --- Get Access Token from Headers ---
-            String accessToken = null;
-            
-            if (headers != null) {
-                for (MessageHeader header : headers) {
-                    if (header.getKey() != null) {
-                        String key = header.getKey().trim();
-                        if ("Authorization".equalsIgnoreCase(key) || "Authorisation".equalsIgnoreCase(key)) {
-                            accessToken = header.getValue();
-                            LOGGER.debug("Using {} token from headers", key);
-                            break;
-                        }
-                    }
-                }
-            }
-
+            // Fetch OAuth2 token
+            String accessToken = fetchNewAccessToken();
             if (accessToken == null || accessToken.trim().isEmpty()) {
-                LOGGER.error("Authorization token must be provided in headers for message listener");
+                LOGGER.error("Failed to obtain access token for message consumption");
                 return;
             }
-            
             muleConnection.setAccessToken(accessToken, 3600);
             LOGGER.info("OAuth2 token obtained for message consumption");
 
@@ -126,7 +163,7 @@ public class SapAmqpConnectorMessageSource extends Source<String, Map<String, Ob
             // Create JMS Connection Factory
             JmsConnectionFactory factory = new JmsConnectionFactory();
             factory.setRemoteURI(connectionUrl);
-            factory.setUsername(config.getClientId());
+            factory.setUsername(clientId);
             factory.setPassword(accessToken);
 
             // Create and start JMS connection
@@ -158,6 +195,24 @@ public class SapAmqpConnectorMessageSource extends Source<String, Map<String, Ob
         } catch (Exception e) {
             LOGGER.error("Failed to start message listener", e);
             onStop();
+        }
+    }
+
+    /**
+     * Validate required parameters
+     */
+    private void validateParameters() throws ConnectionException {
+        if (tokenUrl == null || tokenUrl.trim().isEmpty()) {
+            throw new ConnectionException("Token URL is required");
+        }
+        if (clientId == null || clientId.trim().isEmpty()) {
+            throw new ConnectionException("Client ID is required");
+        }
+        if (clientSecret == null || clientSecret.trim().isEmpty()) {
+            throw new ConnectionException("Client Secret is required");
+        }
+        if (queueName == null || queueName.trim().isEmpty()) {
+            throw new ConnectionException("Queue Name is required");
         }
     }
 
@@ -391,21 +446,21 @@ public class SapAmqpConnectorMessageSource extends Source<String, Map<String, Ob
     }
 
     /**
-     * Get JMS acknowledgment mode from string parameter
+     * Get JMS acknowledgment mode from enum parameter
      */
     private int getAcknowledgmentMode() {
         if (ackMode == null) {
             return Session.AUTO_ACKNOWLEDGE;
         }
 
-        switch (ackMode.toUpperCase()) {
-            case "CLIENT":
+        switch (ackMode) {
+            case CLIENT:
                 LOGGER.info("Using CLIENT_ACKNOWLEDGE mode");
                 return Session.CLIENT_ACKNOWLEDGE;
-            case "DUPS_OK":
+            case DUPS_OK:
                 LOGGER.info("Using DUPS_OK_ACKNOWLEDGE mode");
                 return Session.DUPS_OK_ACKNOWLEDGE;
-            case "AUTO":
+            case AUTO:
             default:
                 LOGGER.info("Using AUTO_ACKNOWLEDGE mode");
                 return Session.AUTO_ACKNOWLEDGE;
@@ -454,6 +509,59 @@ public class SapAmqpConnectorMessageSource extends Source<String, Map<String, Ob
         } catch (Exception e) {
             LOGGER.error("Error parsing URI: {}", wsUri, e);
             throw new ConnectionException("Invalid URI format: " + wsUri, e);
+        }
+    }
+
+    /**
+     * Fetch OAuth2 access token from SAP Event Mesh
+     */
+    private String fetchNewAccessToken() throws ConnectionException {
+        LOGGER.debug("Fetching OAuth2 token for message consumption...");
+        CloseableHttpClient httpClient = HttpClients.createDefault();
+        HttpPost httpPost = new HttpPost(tokenUrl);
+
+        try {
+            // Set Basic Authentication header
+            String auth = clientId + ":" + clientSecret;
+            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
+            httpPost.setHeader("Authorization", "Basic " + encodedAuth);
+            httpPost.setHeader("Content-Type", "application/x-www-form-urlencoded");
+
+            // Set grant_type parameter
+            List<NameValuePair> params = new ArrayList<>();
+            params.add(new BasicNameValuePair("grant_type", "client_credentials"));
+            httpPost.setEntity(new UrlEncodedFormEntity(params));
+
+            LOGGER.debug("Token request to: {}", tokenUrl);
+            HttpResponse response = httpClient.execute(httpPost);
+            HttpEntity entity = response.getEntity();
+            int statusCode = response.getStatusLine().getStatusCode();
+
+            if (statusCode >= 200 && statusCode < 300) {
+                String responseBody = EntityUtils.toString(entity);
+                JsonNode jsonNode = objectMapper.readTree(responseBody);
+                
+                if (jsonNode.has("access_token")) {
+                    String token = jsonNode.get("access_token").asText();
+                    LOGGER.info("Successfully fetched OAuth2 token for consumption");
+                    return token;
+                } else {
+                    throw new ConnectionException("Access token not found in response");
+                }
+            } else {
+                String errorBody = EntityUtils.toString(entity);
+                LOGGER.error("Token fetch failed - Status: {}, Body: {}", statusCode, errorBody);
+                throw new ConnectionException("Failed to fetch token. Status: " + statusCode);
+            }
+        } catch (Exception e) {
+            LOGGER.error("Error during token fetch", e);
+            throw new ConnectionException("Error fetching token: " + e.getMessage(), e);
+        } finally {
+            try {
+                httpClient.close();
+            } catch (Exception e) {
+                LOGGER.error("Error closing HTTP client", e);
+            }
         }
     }
 }
